@@ -1,0 +1,69 @@
+# ============================================
+# RutaIA - Servicios de infraestructura
+# Levantar:  docker compose up -d
+# Apagar:    docker compose down
+# Los valores se leen del archivo .env (ver .env.example)
+# ============================================
+
+services:
+
+  # ---------- Base de datos relacional ----------
+  mysql:
+    image: mysql:8.4
+    container_name: rutaia-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      TZ: America/Guatemala
+    ports:
+      - "${MYSQL_PORT:-3306}:3306"
+    volumes:
+      # Datos persistentes (no se pierden al apagar el contenedor)
+      - mysql_data:/var/lib/mysql
+      # Scripts .sql de esta carpeta se ejecutan solo la PRIMERA vez
+      - ./database:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # ---------- Base de datos vectorial ----------
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: rutaia-qdrant
+    restart: unless-stopped
+    ports:
+      - "${QDRANT_PORT:-6333}:6333"   # API REST + dashboard
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+  # ---------- Automatización ----------
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:latest
+    container_name: rutaia-n8n
+    restart: unless-stopped
+    ports:
+      - "${N8N_PORT:-5678}:5678"
+    environment:
+      GENERIC_TIMEZONE: America/Guatemala
+      TZ: America/Guatemala
+      N8N_SECURE_COOKIE: "false"
+      WEBHOOK_URL: http://localhost:${N8N_PORT:-5678}/
+    volumes:
+      - n8n_data:/home/node/.n8n
+      # Carpeta compartida para exportar/importar los flujos
+      - ./n8n/workflows:/home/node/workflows
+    extra_hosts:
+      # Permite que n8n llame a Spring Boot que corre en tu Windows
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - qdrant
+
+volumes:
+  mysql_data:
+  qdrant_data:
+  n8n_data:
